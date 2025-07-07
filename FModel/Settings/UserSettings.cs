@@ -362,7 +362,7 @@ namespace FModel.Settings
             set => SetProperty(ref _nextAudio, value);
         }
 
-        private EMeshFormat _meshExportFormat = EMeshFormat.UEFormat;
+        private EMeshFormat _meshExportFormat = EMeshFormat.Gltf2;
         public EMeshFormat MeshExportFormat
         {
             get => _meshExportFormat;

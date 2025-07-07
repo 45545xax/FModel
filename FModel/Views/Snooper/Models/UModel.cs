@@ -14,6 +14,7 @@ using FModel.Settings;
 using FModel.Views.Snooper.Buffers;
 using FModel.Views.Snooper.Shading;
 using OpenTK.Graphics.OpenGL4;
+using CUE4Parse_Conversion.Meshes;
 
 namespace FModel.Views.Snooper.Models;
 
@@ -394,7 +395,9 @@ public abstract class UModel : IRenderableModel
 
     public bool Save(out string label, out string savedFilePath)
     {
-        var toSave = new Exporter(_export, UserSettings.Default.ExportOptions);
+        var TempSettings =  UserSettings.Default.ExportOptions;
+        TempSettings.MeshFormat = EMeshFormat.Gltf2;
+        var toSave = new Exporter(_export, TempSettings);
         var result = toSave.TryWriteToDir(new DirectoryInfo(UserSettings.Default.ModelDirectory), out label, out savedFilePath);
         Console.WriteLine($"0");
         // 自动导出所有引用贴图到模型同目录
