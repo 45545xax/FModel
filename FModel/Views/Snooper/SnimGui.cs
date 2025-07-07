@@ -679,6 +679,30 @@ Snooper aims to give an accurate preview of models, materials, skeletal animatio
         material.ImGuiParameters();
 
         ImGui.SeparatorText("Textures");
+        if (ImGui.Button("ExportAllTextures"))
+        {
+            var dialog = new System.Windows.Forms.FolderBrowserDialog();
+            if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+            {
+                string folder = dialog.SelectedPath;
+                int idx = 0;
+                var format = FModel.Settings.UserSettings.Default.TextureExportFormat;
+                string ext = format.ToString().ToLower();
+                void ExportTexture(FModel.Views.Snooper.Shading.Texture tex, string name)
+                {
+                    if (tex != null)
+                    {
+                        string file = System.IO.Path.Combine(folder, $"{material.Name}_{name}_{idx++}.{ext}");
+                        try { tex.SaveAs(file, format); } catch { }
+                    }
+                }
+                foreach (var t in material.Diffuse) ExportTexture(t, "Diffuse");
+                foreach (var t in material.Normals) ExportTexture(t, "Normals");
+                foreach (var t in material.SpecularMasks) ExportTexture(t, "Specular");
+                foreach (var t in material.Emissive) ExportTexture(t, "Emissive");
+                if (material.Ao.Texture != null) ExportTexture(material.Ao.Texture, "AO");
+            }
+        }
         if (material.ImGuiTextures(icons, model))
         {
             _tiOpen = true;

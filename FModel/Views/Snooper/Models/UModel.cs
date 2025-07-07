@@ -395,7 +395,36 @@ public abstract class UModel : IRenderableModel
     public bool Save(out string label, out string savedFilePath)
     {
         var toSave = new Exporter(_export, UserSettings.Default.ExportOptions);
-        return toSave.TryWriteToDir(new DirectoryInfo(UserSettings.Default.ModelDirectory), out label, out savedFilePath);
+        var result = toSave.TryWriteToDir(new DirectoryInfo(UserSettings.Default.ModelDirectory), out label, out savedFilePath);
+        Console.WriteLine($"0");
+        // 自动导出所有引用贴图到模型同目录
+        if (result && !string.IsNullOrEmpty(savedFilePath) && Materials != null)
+        {
+            Console.WriteLine($"1");
+            var folder = System.IO.Path.GetDirectoryName(savedFilePath);
+            var format = FModel.Settings.UserSettings.Default.TextureExportFormat;
+            string ext = format.ToString().ToLower();
+            int idx = 0;
+            foreach (var mat in Materials)
+            {
+                if (mat == null) continue;
+                Console.WriteLine($"Material: {mat.Name}, Diffuse count: {mat.Diffuse?.Length}");
+                void ExportTex(FModel.Views.Snooper.Shading.Texture tex, string type)
+                {
+                    if (tex != null)
+                    {
+                        string file = System.IO.Path.Combine(folder, $"{Name}_{mat.Name}_{type}_{idx++}.{ext}");
+                        try { tex.SaveAs(file, format); } catch { }
+                    }
+                }
+                foreach (var t in mat.Diffuse) ExportTex(t, "Diffuse");
+                foreach (var t in mat.Normals) ExportTex(t, "Normals");
+                foreach (var t in mat.SpecularMasks) ExportTex(t, "Specular");
+                foreach (var t in mat.Emissive) ExportTex(t, "Emissive");
+                if (mat.Ao.Texture != null) ExportTex(mat.Ao.Texture, "AO");
+            }
+        }
+        return result;
     }
 
     public virtual void Dispose()

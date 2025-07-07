@@ -1,10 +1,12 @@
 using System;
+using System.IO;
 using System.Numerics;
 using System.Windows;
 using CUE4Parse_Conversion.Textures;
 using CUE4Parse.UE4.Assets.Exports.Texture;
 using CUE4Parse.UE4.Objects.Core.Math;
 using CUE4Parse.UE4.Objects.Core.Misc;
+using FModel.Settings;
 using ImGuiNET;
 using OpenTK.Graphics.OpenGL4;
 using SixLabors.ImageSharp;
@@ -304,6 +306,60 @@ public class Texture : IDisposable
             drawList.AddRect(relativeMiddle - size, relativeMiddle + size, 0xFFFFFFFF);
         }
         drawList.PopClipRect();
+    }
+
+    public void SaveAs(string filePath, ETextureFormat format)
+    {
+        using var bitmap = GetSkBitmap();
+        using var image = SkiaSharp.SKImage.FromBitmap(bitmap);
+        switch (format)
+        {
+            case ETextureFormat.Png:
+                using (var data = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100))
+                using (var stream = File.OpenWrite(filePath))
+                    data.SaveTo(stream);
+                break;
+            case ETextureFormat.Jpeg:
+                using (var data = image.Encode(SkiaSharp.SKEncodedImageFormat.Jpeg, 95))
+                using (var stream = File.OpenWrite(filePath))
+                    data.SaveTo(stream);
+                break;
+            // 可扩展更多格式
+            default:
+                throw new NotSupportedException($"Not supported: {format}");
+        }
+    }
+
+    // 保留原有 SaveAsPng 兼容
+    public void SaveAsPng(string filePath) => SaveAs(filePath, ETextureFormat.Png);
+
+    private SkiaSharp.SKBitmap GetSkBitmap()
+    {
+        // 只支持2D纹理导出
+        if (_handle == 0 || Width <= 0 || Height <= 0) return null;
+
+        // 绑定当前纹理
+        GL.BindTexture(_target, _handle);
+
+        // 分配像素缓冲区
+        byte[] pixels = new byte[Width * Height * 4];
+        GL.GetTexImage(_target, 0, PixelFormat.Rgba, PixelType.UnsignedByte, pixels);
+
+        // 创建 SKBitmap 并填充像素
+        var bitmap = new SKBitmap(Width, Height, SKColorType.Rgba8888, SKAlphaType.Premul);
+        // 注意：OpenGL 读取的像素是倒置的，需要翻转
+        unsafe
+        {
+            fixed (byte* src = pixels)
+            {
+                for (int y = 0; y < Height; y++)
+                {
+                    IntPtr destRow = bitmap.GetAddr(0, Height - 1 - y);
+                    System.Buffer.MemoryCopy(src + y * Width * 4, (void*)destRow, Width * 4, Width * 4);
+                }
+            }
+        }
+        return bitmap;
     }
 }
 
