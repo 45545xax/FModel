@@ -548,6 +548,67 @@ public class CUE4ParseViewModel : ViewModel
     public void AnimationFolder(CancellationToken cancellationToken, TreeItem folder)
         => BulkFolder(cancellationToken, folder, asset => Extract(cancellationToken, asset, TabControl.HasNoTabs, EBulkType.Animations | EBulkType.Auto));
 
+    public void ModelAndTextureFolder(CancellationToken cancellationToken, TreeItem folder)
+        => BulkFolder(cancellationToken, folder, asset => Extract(cancellationToken, asset, TabControl.HasNoTabs, EBulkType.Meshes | EBulkType.Textures | EBulkType.Auto));
+
+    public void ModelAndTextureFolderWithViewer(CancellationToken cancellationToken, TreeItem folder)
+    {
+        // 递归遍历当前文件夹及所有子文件夹下的所有模型
+        void ProcessFolder(TreeItem currentFolder)
+        {
+            var assets = currentFolder.AssetsList.Assets.Where(asset => asset.Extension == "uasset" || asset.Extension == "umap").ToList();
+            foreach (var asset in assets)
+            {
+                try
+                {
+                    var result = Provider.GetLoadPackageResult(asset);
+                    for (var i = result.InclusiveStart; i < result.ExclusiveEnd; i++)
+                    {
+                        var pkg = result.Package;
+                        var pointer = new FPackageIndex(pkg, i + 1).ResolvedObject;
+                        if (pointer?.Object is null) continue;
+                        var dummy = ((AbstractUePackage)pkg).ConstructObject(pointer.Class?.Object?.Value as UStruct, pkg);
+                        // 只处理静态/骨骼模型
+                        if (dummy is UStaticMesh || dummy is USkeletalMesh)
+                        {
+                            if (SnooperViewer.TryLoadExport(cancellationToken, dummy, pointer.Object))
+                            {
+                                SnooperViewer.Run(); // 初始化3D环境
+                                                     // 获取UModel实例并自动保存
+                                Thread.Sleep(1000); // 确保模型已加载
+                                var models = SnooperViewer.Renderer.Options.Models.Values.ToList();
+                                if (models.Count > 0)
+                                {
+                                    var model = models[0];
+                                    model.Save(out var label, out var savedFilePath);
+                                    FLogger.Append(ELog.Information, () =>
+                                    {
+                                        FLogger.Text($"Auto saved model and textures: {asset.Name}", Constants.WHITE);
+                                    });
+                                    // 导出后自动关闭3D Viewer
+                                    SnooperViewer.WindowShouldClose(true, false);            
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    FLogger.Append(ELog.Error, () =>
+                    {
+                        FLogger.Text($"Failed to save model: {asset.Name} - {ex.Message}", Constants.RED);
+                    });
+                }
+            }
+            foreach (var sub in currentFolder.Folders)
+            {
+                ProcessFolder(sub);
+            }
+        }
+        ProcessFolder(folder);
+    }
+
     public void Extract(CancellationToken cancellationToken, GameFile entry, bool addNewTab = false, EBulkType bulk = EBulkType.None)
     {
         Log.Information("User DOUBLE-CLICKED to extract '{FullPath}'", entry.Path);
