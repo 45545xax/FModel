@@ -211,6 +211,18 @@ public partial class MainWindow
             });
         }
     }
+    private async void OnFolderModelAndTextureClick(object sender, RoutedEventArgs e)
+    {
+        if (AssetsFolderName.SelectedItem is TreeItem folder)
+            {
+                await _threadWorkerView.Begin(cancellationToken => { _applicationView.CUE4Parse.ModelAndTextureFolderWithViewer(cancellationToken, folder); });
+                FLogger.Append(ELog.Information, () =>
+                {
+                    FLogger.Text("Successfully saved models from ", Constants.WHITE);
+                    FLogger.Link(folder.PathAtThisPoint, UserSettings.Default.ModelDirectory, true);
+                });
+            }
+    }
 
     private async void OnFolderModelClick(object sender, RoutedEventArgs e)
     {

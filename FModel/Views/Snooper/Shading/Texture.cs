@@ -352,10 +352,10 @@ public class Texture : IDisposable
         {
             fixed (byte* src = pixels)
             {
-                for (int y = 0; y < Height; y++)
+                for (int x = 0; x < Height; x++)
                 {
-                    IntPtr destRow = bitmap.GetAddr(0, Height - 1 - y);
-                    System.Buffer.MemoryCopy(src + y * Width * 4, (void*)destRow, Width * 4, Width * 4);
+                    IntPtr destRow = bitmap.GetAddr(0, x);
+                    System.Buffer.MemoryCopy(src + x * Width * 4, (void*) destRow, Width * 4, Width * 4);
                 }
             }
         }
