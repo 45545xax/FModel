@@ -1048,28 +1048,20 @@ public class CUE4ParseViewModel : ViewModel
         
         FLogger.Append(ELog.Information, () =>
         {
-            FLogger.Text($"Starting native batch export as {exportFormat} for folder: {folder.PathAtThisPoint}", Constants.BLUE);
+            FLogger.Text($"Starting native batch export (models + textures) as {exportFormat} for current folder only: {folder.PathAtThisPoint}", Constants.BLUE);
         });
         
-        // 获取所有资产文件
-        var allAssets = new List<GameFile>();
-        void CollectAssets(TreeItem currentFolder)
-        {
-            allAssets.AddRange(currentFolder.AssetsList.Assets.Where(asset => asset.Extension == "uasset"));
-            foreach (var sub in currentFolder.Folders)
-            {
-                CollectAssets(sub);
-            }
-        }
-        CollectAssets(folder);
+        // 只获取当前文件夹的资产文件，不递归遍历子文件夹
+        var currentFolderAssets = folder.AssetsList.Assets.Where(asset => asset.Extension == "uasset").ToList();
         
         FLogger.Append(ELog.Information, () =>
         {
-            FLogger.Text($"Found {allAssets.Count} .uasset files to process", Constants.WHITE);
+            FLogger.Text($"Found {currentFolderAssets.Count} .uasset files in current folder", Constants.WHITE);
+            FLogger.Text($"Will export models and their referenced textures", Constants.WHITE);
         });
         
         // 逐个处理，使用与Test Single Model Export相同的方法
-        foreach (var asset in allAssets)
+        foreach (var asset in currentFolderAssets)
         {
             if (cancellationToken.IsCancellationRequested) break;
             
@@ -1077,18 +1069,18 @@ public class CUE4ParseViewModel : ViewModel
             
             FLogger.Append(ELog.Information, () =>
             {
-                FLogger.Text($"Processing [{processedCount}/{allAssets.Count}]: {asset.Name}", Constants.YELLOW);
+                FLogger.Text($"Processing [{processedCount}/{currentFolderAssets.Count}]: {asset.Name}", Constants.YELLOW);
             });
             
             try
             {
-                // 使用与Test Single Model Export完全相同的方法
-                Extract(cancellationToken, asset, false, EBulkType.Meshes);
+                // 使用组合的EBulkType标志同时导出模型和贴图
+                Extract(cancellationToken, asset, false, EBulkType.Meshes | EBulkType.Textures);
                 
                 savedCount++;
                 FLogger.Append(ELog.Information, () =>
                 {
-                    FLogger.Text($"✓ Exported [{savedCount}]: {asset.Name}", Constants.GREEN);
+                    FLogger.Text($"✓ Exported [{savedCount}]: {asset.Name} (models and textures)", Constants.GREEN);
                 });
             }
             catch (Exception ex)
@@ -1119,6 +1111,7 @@ public class CUE4ParseViewModel : ViewModel
         {
             FLogger.Text($"Native batch export completed:", Constants.BLUE);
             FLogger.Text($" • Export format: {exportFormat}", Constants.BLUE);
+            FLogger.Text($" • Current folder only: {folder.PathAtThisPoint}", Constants.BLUE);
             FLogger.Text($" • Total processed: {processedCount}", Constants.WHITE);
             FLogger.Text($" • Successfully saved: {savedCount}", Constants.GREEN);
             FLogger.Text($" • Errors: {errorCount}", Constants.RED);

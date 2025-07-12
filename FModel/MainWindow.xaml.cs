@@ -270,11 +270,19 @@ public partial class MainWindow
     {
         if (AssetsFolderName.SelectedItem is TreeItem folder)
         {
-            await _threadWorkerView.Begin(cancellationToken => { _applicationView.CUE4Parse.ModelAndTextureFolderNative(cancellationToken, folder, UserSettings.Default.MeshExportFormat); });
             FLogger.Append(ELog.Information, () =>
             {
-                FLogger.Text("Batch export using native method completed. Check output directory: ", Constants.WHITE);
-                FLogger.Link(UserSettings.Default.ModelDirectory, UserSettings.Default.ModelDirectory, true);
+                FLogger.Text("Starting export of current folder's models and textures...", Constants.BLUE);
+            });
+            
+            await _threadWorkerView.Begin(cancellationToken => { _applicationView.CUE4Parse.ModelAndTextureFolderNative(cancellationToken, folder, UserSettings.Default.MeshExportFormat); });
+            
+            FLogger.Append(ELog.Information, () =>
+            {
+                FLogger.Text("Batch export completed. Check output directories: ", Constants.WHITE);
+                FLogger.Link("Models", UserSettings.Default.ModelDirectory, true);
+                FLogger.Text(" and ", Constants.WHITE);
+                FLogger.Link("Textures", UserSettings.Default.TextureDirectory, true);
             });
         }
     }
