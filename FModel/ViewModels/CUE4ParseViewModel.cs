@@ -592,28 +592,21 @@ public class CUE4ParseViewModel : ViewModel
                         // 只处理静态/骨骼模型
                         if (dummy is UStaticMesh || dummy is USkeletalMesh)
                         {
-                            // 直接使用导出功能，避免3D Viewer相关的内存问题  
+                            // 尝试使用FModel的原生SaveExport方法
                             try
                             {
-                                // 智能导出：首先尝试指定格式，失败时自动回退
-                                if (TryExportWithFallback(dummy, exportFormat, asset.Name, out var savedPath))
+                                FLogger.Append(ELog.Information, () =>
                                 {
-                                    savedCount++;
-                                    FLogger.Append(ELog.Information, () =>
-                                    {
-                                        FLogger.Text($"✓ Saved [{savedCount}]: ", Constants.GREEN);
-                                        FLogger.Text($"{asset.Name} → ", Constants.WHITE);
-                                        FLogger.Link(Path.GetFileName(savedPath), savedPath, true);
-                                    });
-                                }
-                                else
+                                    FLogger.Text($"Trying FModel's SaveExport method...", Constants.YELLOW);
+                                });
+                                
+                                SaveExport(dummy, true);
+                                
+                                savedCount++;
+                                FLogger.Append(ELog.Information, () =>
                                 {
-                                    errorCount++;
-                                    FLogger.Append(ELog.Warning, () =>
-                                    {
-                                        FLogger.Text($"✗ All export formats failed for: {asset.Name}", Constants.YELLOW);
-                                    });
-                                }
+                                    FLogger.Text($"✓ Saved [{savedCount}] using SaveExport: {asset.Name}", Constants.GREEN);
+                                });
                             }
                             catch (AccessViolationException ex)
                             {
@@ -777,11 +770,37 @@ public class CUE4ParseViewModel : ViewModel
                         if (pointer?.Object is null) continue;
                         
                         var dummy = ((AbstractUePackage)pkg).ConstructObject(pointer.Class?.Object?.Value as UStruct, pkg);
-                        if (dummy is UStaticMesh || dummy is USkeletalMesh)
+                        if (dummy is UStaticMesh staticMesh || dummy is USkeletalMesh skeletalMesh)
                         {
+                            // 深度调试模型信息
                             FLogger.Append(ELog.Information, () =>
                             {
-                                FLogger.Text($"Found {dummy.ExportType}: '{dummy.Name}' (Full: {dummy.GetFullName()})", Constants.GRAY);
+                                FLogger.Text($"=== Model Debug Info ===", Constants.BLUE);
+                                FLogger.Text($"Type: {dummy.ExportType}", Constants.GRAY);
+                                FLogger.Text($"Name: '{dummy.Name}'", Constants.GRAY);
+                                FLogger.Text($"FullName: '{dummy.GetFullName()}'", Constants.GRAY);
+                                FLogger.Text($"Package: '{pkg.Name}'", Constants.GRAY);
+                                FLogger.Text($"Asset: '{asset.Name}'", Constants.GRAY);
+                                FLogger.Text($"Export Index: {j + 1}", Constants.GRAY);
+                                
+                                if (dummy is UStaticMesh sm)
+                                {
+                                    FLogger.Text($"Static Mesh LODs: {sm.GetOrDefault("NumLODs", 0)}", Constants.GRAY);
+                                    FLogger.Text($"Render Data: {sm.GetOrDefault("RenderData", "null")}", Constants.GRAY);
+                                }
+                                else if (dummy is USkeletalMesh skm)
+                                {
+                                    FLogger.Text($"Skeletal Mesh LODs: {skm.GetOrDefault("LODInfo", new object[0]).Length}", Constants.GRAY);
+                                }
+                            });
+                            
+                            // 尝试使用资产名称作为模型名称
+                            var modelName = string.IsNullOrEmpty(dummy.Name) ? 
+                                asset.NameWithoutExtension : dummy.Name;
+                            
+                            FLogger.Append(ELog.Information, () =>
+                            {
+                                FLogger.Text($"Using model name: '{modelName}'", Constants.YELLOW);
                             });
                             
                             try
@@ -1017,6 +1036,84 @@ public class CUE4ParseViewModel : ViewModel
             });
             ModelAndTextureFolderWithViewer(cancellationToken, folder, UserSettings.Default.MeshExportFormat);
         }
+    }
+
+    // 测试单个模型导出（使用不同方法）
+    public void TestSingleModelExport(CancellationToken cancellationToken, TreeItem folder)
+    {
+        FLogger.Append(ELog.Information, () =>
+        {
+            FLogger.Text("=== Single Model Export Test ===", Constants.BLUE);
+        });
+        
+        var testAsset = folder.AssetsList.Assets.FirstOrDefault(asset => asset.Extension == "uasset");
+        if (testAsset == null)
+        {
+            FLogger.Append(ELog.Warning, () =>
+            {
+                FLogger.Text("No .uasset files found in this folder", Constants.YELLOW);
+            });
+            return;
+        }
+        
+        FLogger.Append(ELog.Information, () =>
+        {
+            FLogger.Text($"Testing with: {testAsset.Name}", Constants.WHITE);
+        });
+        
+        try
+        {
+            // 方法1: 使用原有的Extract方法（单个模型）
+            FLogger.Append(ELog.Information, () =>
+            {
+                FLogger.Text("Method 1: Using standard Extract...", Constants.YELLOW);
+            });
+            
+            Extract(cancellationToken, testAsset, true, EBulkType.Meshes);
+            
+            FLogger.Append(ELog.Information, () =>
+            {
+                FLogger.Text("✓ Extract method completed", Constants.GREEN);
+            });
+        }
+        catch (Exception ex)
+        {
+            FLogger.Append(ELog.Error, () =>
+            {
+                FLogger.Text($"✗ Extract method failed: {ex.Message}", Constants.RED);
+            });
+        }
+        
+        try
+        {
+            // 方法2: 直接使用ModelFolder方法（会保存为选定格式）
+            FLogger.Append(ELog.Information, () =>
+            {
+                FLogger.Text("Method 2: Using ModelFolder...", Constants.YELLOW);
+            });
+            
+            var tempFolder = new TreeItem("test", testAsset, "test");
+            tempFolder.AssetsList.Assets.Add(testAsset);
+            ModelFolder(cancellationToken, tempFolder);
+            
+            FLogger.Append(ELog.Information, () =>
+            {
+                FLogger.Text("✓ ModelFolder method completed", Constants.GREEN);
+            });
+        }
+        catch (Exception ex)
+        {
+            FLogger.Append(ELog.Error, () =>
+            {
+                FLogger.Text($"✗ ModelFolder method failed: {ex.Message}", Constants.RED);
+            });
+        }
+        
+        FLogger.Append(ELog.Information, () =>
+        {
+            FLogger.Text("=== Test Complete ===", Constants.BLUE);
+            FLogger.Text("Check your output directory for any exported files", Constants.WHITE);
+        });
     }
 
     // 诊断和测试导出格式
