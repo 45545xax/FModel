@@ -9,6 +9,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using CUE4Parse_Conversion.Meshes;
 using AdonisUI.Controls;
 using CUE4Parse.Compression;
 using CUE4Parse.Encryption.Aes;
@@ -614,7 +615,7 @@ public class CUE4ParseViewModel : ViewModel
                                     errorCount++;
                                     FLogger.Append(ELog.Warning, () =>
                                     {
-                                        FLogger.Text($"✗ Failed to save as {exportFormat}: {asset.Name}", Constants.ORANGE);
+                                        FLogger.Text($"✗ Failed to save as {exportFormat}: {asset.Name}", Constants.YELLOW);
                                     });
                                 }
                             }
@@ -664,7 +665,7 @@ public class CUE4ParseViewModel : ViewModel
         {
             FLogger.Append(ELog.Information, () =>
             {
-                FLogger.Text($"Starting batch model and texture export as {exportFormat} for folder: {folder.PathAtThisPoint}", Constants.CYAN);
+                FLogger.Text($"Starting batch model and texture export as {exportFormat} for folder: {folder.PathAtThisPoint}", Constants.BLUE);
             });
             
             ProcessFolder(folder);
@@ -672,8 +673,8 @@ public class CUE4ParseViewModel : ViewModel
             // 输出最终统计信息
             FLogger.Append(ELog.Information, () =>
             {
-                FLogger.Text($"Batch export completed:", Constants.CYAN);
-                FLogger.Text($" • Export format: {exportFormat}", Constants.CYAN);
+                FLogger.Text($"Batch export completed:", Constants.BLUE);
+                FLogger.Text($" • Export format: {exportFormat}", Constants.BLUE);
                 FLogger.Text($" • Total processed: {processedCount}", Constants.WHITE);
                 FLogger.Text($" • Successfully saved: {savedCount}", Constants.GREEN);
                 FLogger.Text($" • Errors: {errorCount}", Constants.RED);
@@ -713,7 +714,7 @@ public class CUE4ParseViewModel : ViewModel
                 // 如果不支持FBX，使用ActorX作为替代（通常兼容性较好）
                 FLogger.Append(ELog.Warning, () =>
                 {
-                    FLogger.Text("FBX format not directly supported, using ActorX format instead", Constants.ORANGE);
+                    FLogger.Text("FBX format not directly supported, using ActorX format instead", Constants.YELLOW);
                 });
                 ModelAndTextureFolderSafe(cancellationToken, folder, EMeshFormat.ActorX);
             }
@@ -737,7 +738,7 @@ public class CUE4ParseViewModel : ViewModel
         
         FLogger.Append(ELog.Information, () =>
         {
-            FLogger.Text($"Starting safe batch export as {exportFormat} for folder: {folder.PathAtThisPoint}", Constants.CYAN);
+            FLogger.Text($"Starting safe batch export as {exportFormat} for folder: {folder.PathAtThisPoint}", Constants.BLUE);
         });
         
         // 获取所有资产文件
@@ -803,7 +804,7 @@ public class CUE4ParseViewModel : ViewModel
                                 errorCount++;
                                 FLogger.Append(ELog.Warning, () =>
                                 {
-                                    FLogger.Text($"✗ Failed to save: {asset.Name}", Constants.ORANGE);
+                                    FLogger.Text($"✗ Failed to save: {asset.Name}", Constants.YELLOW);
                                 });
                                 processed = true;
                             }
@@ -868,8 +869,8 @@ public class CUE4ParseViewModel : ViewModel
         // 输出最终统计信息
         FLogger.Append(ELog.Information, () =>
         {
-            FLogger.Text($"Safe batch export completed:", Constants.CYAN);
-            FLogger.Text($" • Export format: {exportFormat}", Constants.CYAN);
+            FLogger.Text($"Safe batch export completed:", Constants.BLUE);
+            FLogger.Text($" • Export format: {exportFormat}", Constants.BLUE);
             FLogger.Text($" • Total processed: {processedCount}", Constants.WHITE);
             FLogger.Text($" • Successfully saved: {savedCount}", Constants.GREEN);
             FLogger.Text($" • Errors: {errorCount}", Constants.RED);
