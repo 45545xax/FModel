@@ -592,22 +592,18 @@ public class CUE4ParseViewModel : ViewModel
                         // 只处理静态/骨骼模型
                         if (dummy is UStaticMesh || dummy is USkeletalMesh)
                         {
-                            // 直接使用导出功能，避免3D Viewer相关的内存问题
+                            // 直接使用导出功能，避免3D Viewer相关的内存问题  
                             try
                             {
-                                // 直接使用Export功能，绕过3D Viewer的内存管理问题
-                                var tempSettings = UserSettings.Default.ExportOptions;
-                                tempSettings.MeshFormat = exportFormat;
-                                var exporter = new Exporter(dummy, tempSettings);
-                                
-                                if (exporter.TryWriteToDir(new DirectoryInfo(UserSettings.Default.ModelDirectory), out var label, out var savedFilePath))
+                                // 智能导出：首先尝试指定格式，失败时自动回退
+                                if (TryExportWithFallback(dummy, exportFormat, asset.Name, out var savedPath))
                                 {
                                     savedCount++;
                                     FLogger.Append(ELog.Information, () =>
                                     {
-                                        FLogger.Text($"✓ Saved [{savedCount}] as {exportFormat}: ", Constants.GREEN);
+                                        FLogger.Text($"✓ Saved [{savedCount}]: ", Constants.GREEN);
                                         FLogger.Text($"{asset.Name} → ", Constants.WHITE);
-                                        FLogger.Link(label, savedFilePath, true);
+                                        FLogger.Link(Path.GetFileName(savedPath), savedPath, true);
                                     });
                                 }
                                 else
@@ -615,7 +611,7 @@ public class CUE4ParseViewModel : ViewModel
                                     errorCount++;
                                     FLogger.Append(ELog.Warning, () =>
                                     {
-                                        FLogger.Text($"✗ Failed to save as {exportFormat}: {asset.Name}", Constants.YELLOW);
+                                        FLogger.Text($"✗ All export formats failed for: {asset.Name}", Constants.YELLOW);
                                     });
                                 }
                             }
@@ -785,7 +781,7 @@ public class CUE4ParseViewModel : ViewModel
                         {
                             FLogger.Append(ELog.Information, () =>
                             {
-                                FLogger.Text($"Found {dummy.ExportType}: {dummy.Name}", Constants.GRAY);
+                                FLogger.Text($"Found {dummy.ExportType}: '{dummy.Name}' (Full: {dummy.GetFullName()})", Constants.GRAY);
                             });
                             
                             try
@@ -825,14 +821,74 @@ public class CUE4ParseViewModel : ViewModel
                                 }
                                 else
                                 {
-                                    errorCount++;
-                                    FLogger.Append(ELog.Warning, () =>
+                                    // UEFormat 失败时自动尝试其他格式
+                                    if (exportFormat == EMeshFormat.UEFormat)
                                     {
-                                        FLogger.Text($"✗ Export failed for {asset.Name}: ", Constants.YELLOW);
-                                        FLogger.Text($"TryWriteToDir returned false", Constants.YELLOW);
-                                        FLogger.Text($"Output dir: {outputDir.FullName}", Constants.GRAY);
-                                    });
-                                    processed = true;
+                                        FLogger.Append(ELog.Warning, () =>
+                                        {
+                                            FLogger.Text($"UEFormat failed for {asset.Name}, trying Gltf2...", Constants.YELLOW);
+                                        });
+                                        
+                                        // 尝试 GLTF2 格式
+                                        var fallbackSettings = UserSettings.Default.ExportOptions;
+                                        fallbackSettings.MeshFormat = EMeshFormat.Gltf2;
+                                        var fallbackExporter = new Exporter(dummy, fallbackSettings);
+                                        
+                                        if (fallbackExporter.TryWriteToDir(outputDir, out var fallbackLabel, out var fallbackPath))
+                                        {
+                                            savedCount++;
+                                            FLogger.Append(ELog.Information, () =>
+                                            {
+                                                FLogger.Text($"✓ Saved [{savedCount}] as Gltf2 (fallback): ", Constants.GREEN);
+                                                FLogger.Text($"{asset.Name} → ", Constants.WHITE);
+                                                FLogger.Link(fallbackLabel, fallbackPath, true);
+                                            });
+                                            processed = true;
+                                        }
+                                        else
+                                        {
+                                            // 再尝试 ActorX 格式
+                                            FLogger.Append(ELog.Warning, () =>
+                                            {
+                                                FLogger.Text($"Gltf2 also failed, trying ActorX...", Constants.YELLOW);
+                                            });
+                                            
+                                            fallbackSettings.MeshFormat = EMeshFormat.ActorX;
+                                            var actorXExporter = new Exporter(dummy, fallbackSettings);
+                                            
+                                            if (actorXExporter.TryWriteToDir(outputDir, out var actorXLabel, out var actorXPath))
+                                            {
+                                                savedCount++;
+                                                FLogger.Append(ELog.Information, () =>
+                                                {
+                                                    FLogger.Text($"✓ Saved [{savedCount}] as ActorX (fallback): ", Constants.GREEN);
+                                                    FLogger.Text($"{asset.Name} → ", Constants.WHITE);
+                                                    FLogger.Link(actorXLabel, actorXPath, true);
+                                                });
+                                                processed = true;
+                                            }
+                                            else
+                                            {
+                                                errorCount++;
+                                                FLogger.Append(ELog.Error, () =>
+                                                {
+                                                    FLogger.Text($"✗ All formats failed for {asset.Name}", Constants.RED);
+                                                });
+                                                processed = true;
+                                            }
+                                        }
+                                    }
+                                    else
+                                    {
+                                        errorCount++;
+                                        FLogger.Append(ELog.Warning, () =>
+                                        {
+                                            FLogger.Text($"✗ Export failed for {asset.Name}: ", Constants.YELLOW);
+                                            FLogger.Text($"TryWriteToDir returned false for {exportFormat}", Constants.YELLOW);
+                                            FLogger.Text($"Output dir: {outputDir.FullName}", Constants.GRAY);
+                                        });
+                                        processed = true;
+                                    }
                                 }
                             }
                             catch (Exception exportEx)
@@ -1018,6 +1074,62 @@ public class CUE4ParseViewModel : ViewModel
         });
     }
     
+    // 智能导出方法：尝试指定格式，失败时自动回退到其他格式
+    private bool TryExportWithFallback(UObject dummy, EMeshFormat preferredFormat, string assetName, out string savedFilePath)
+    {
+        savedFilePath = string.Empty;
+        var outputDir = new DirectoryInfo(UserSettings.Default.ModelDirectory);
+        if (!outputDir.Exists) outputDir.Create();
+        
+        // 尝试的格式顺序
+        var formatsToTry = new List<EMeshFormat> { preferredFormat };
+        
+        // 如果首选格式不是这些，添加回退选项
+        if (preferredFormat != EMeshFormat.Gltf2) formatsToTry.Add(EMeshFormat.Gltf2);
+        if (preferredFormat != EMeshFormat.ActorX) formatsToTry.Add(EMeshFormat.ActorX);
+        
+        foreach (var format in formatsToTry)
+        {
+            try
+            {
+                var tempSettings = UserSettings.Default.ExportOptions;
+                tempSettings.MeshFormat = format;
+                var exporter = new Exporter(dummy, tempSettings);
+                
+                if (exporter.TryWriteToDir(outputDir, out var label, out var filePath))
+                {
+                    savedFilePath = filePath;
+                    
+                    if (format != preferredFormat)
+                    {
+                        FLogger.Append(ELog.Warning, () =>
+                        {
+                            FLogger.Text($"Exported {assetName} as {format} (fallback from {preferredFormat})", Constants.YELLOW);
+                        });
+                    }
+                    
+                    return true;
+                }
+                else if (format != preferredFormat)
+                {
+                    FLogger.Append(ELog.Information, () =>
+                    {
+                        FLogger.Text($"Fallback format {format} also failed for {assetName}", Constants.GRAY);
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                FLogger.Append(ELog.Information, () =>
+                {
+                    FLogger.Text($"Exception during {format} export for {assetName}: {ex.Message}", Constants.GRAY);
+                });
+            }
+        }
+        
+        return false;
+    }
+
     // 测试单个资产的导出
     private void TestSingleAsset(GameFile asset, EMeshFormat format)
     {
