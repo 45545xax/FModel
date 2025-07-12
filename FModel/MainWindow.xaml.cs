@@ -266,6 +266,19 @@ public partial class MainWindow
         }
     }
 
+    private async void OnFolderModelNativeClick(object sender, RoutedEventArgs e)
+    {
+        if (AssetsFolderName.SelectedItem is TreeItem folder)
+        {
+            await _threadWorkerView.Begin(cancellationToken => { _applicationView.CUE4Parse.ModelAndTextureFolderNative(cancellationToken, folder, UserSettings.Default.MeshExportFormat); });
+            FLogger.Append(ELog.Information, () =>
+            {
+                FLogger.Text("Batch export using native method completed. Check output directory: ", Constants.WHITE);
+                FLogger.Link(UserSettings.Default.ModelDirectory, UserSettings.Default.ModelDirectory, true);
+            });
+        }
+    }
+
     private async void OnFolderModelClick(object sender, RoutedEventArgs e)
     {
         if (AssetsFolderName.SelectedItem is TreeItem folder)

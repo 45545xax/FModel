@@ -592,20 +592,21 @@ public class CUE4ParseViewModel : ViewModel
                         // 只处理静态/骨骼模型
                         if (dummy is UStaticMesh || dummy is USkeletalMesh)
                         {
-                            // 尝试使用FModel的原生SaveExport方法
+                            // 使用FModel的原生方法（与Test Single Model Export相同的逻辑）
                             try
                             {
                                 FLogger.Append(ELog.Information, () =>
                                 {
-                                    FLogger.Text($"Trying FModel's SaveExport method...", Constants.YELLOW);
+                                    FLogger.Text($"Using FModel's native export method...", Constants.YELLOW);
                                 });
                                 
-                                SaveExport(dummy, true);
+                                // 使用相同的方法：Extract with EBulkType.Meshes
+                                Extract(cancellationToken, asset, false, EBulkType.Meshes);
                                 
                                 savedCount++;
                                 FLogger.Append(ELog.Information, () =>
                                 {
-                                    FLogger.Text($"✓ Saved [{savedCount}] using SaveExport: {asset.Name}", Constants.GREEN);
+                                    FLogger.Text($"✓ Saved [{savedCount}] using native method: {asset.Name}", Constants.GREEN);
                                 });
                             }
                             catch (AccessViolationException ex)
@@ -680,7 +681,7 @@ public class CUE4ParseViewModel : ViewModel
         }
     }
 
-    // 专门的FBX导出方法（使用安全版本）
+    // 专门的FBX导出方法（使用原生方法）
     public void ModelAndTextureFolderWithViewerAsFBX(CancellationToken cancellationToken, TreeItem folder)
     {
         // 尝试设置为FBX格式（如果支持）
@@ -691,12 +692,12 @@ public class CUE4ParseViewModel : ViewModel
             if (Enum.IsDefined(typeof(EMeshFormat), "FBX"))
             {
                 var fbxFormat = (EMeshFormat)Enum.Parse(typeof(EMeshFormat), "FBX");
-                ModelAndTextureFolderSafe(cancellationToken, folder, fbxFormat);
+                ModelAndTextureFolderNative(cancellationToken, folder, fbxFormat);
             }
             else if (Enum.IsDefined(typeof(EMeshFormat), "Fbx"))
             {
                 var fbxFormat = (EMeshFormat)Enum.Parse(typeof(EMeshFormat), "Fbx");
-                ModelAndTextureFolderSafe(cancellationToken, folder, fbxFormat);
+                ModelAndTextureFolderNative(cancellationToken, folder, fbxFormat);
             }
             else
             {
@@ -705,16 +706,16 @@ public class CUE4ParseViewModel : ViewModel
                 {
                     FLogger.Text("FBX format not directly supported, using ActorX format instead", Constants.YELLOW);
                 });
-                ModelAndTextureFolderSafe(cancellationToken, folder, EMeshFormat.ActorX);
+                ModelAndTextureFolderNative(cancellationToken, folder, EMeshFormat.ActorX);
             }
         }
         catch (Exception ex)
         {
             FLogger.Append(ELog.Error, () =>
             {
-                FLogger.Text($"Failed to use FBX format, falling back to safe export: {ex.Message}", Constants.RED);
+                FLogger.Text($"Failed to use FBX format, falling back to native export: {ex.Message}", Constants.RED);
             });
-            ModelAndTextureFolderSafe(cancellationToken, folder, UserSettings.Default.MeshExportFormat);
+            ModelAndTextureFolderNative(cancellationToken, folder, UserSettings.Default.MeshExportFormat);
         }
     }
 
@@ -1036,6 +1037,94 @@ public class CUE4ParseViewModel : ViewModel
             });
             ModelAndTextureFolderWithViewer(cancellationToken, folder, UserSettings.Default.MeshExportFormat);
         }
+    }
+
+    // 基于成功测试方法的批量导出（使用FModel原生方法）
+    public void ModelAndTextureFolderNative(CancellationToken cancellationToken, TreeItem folder, EMeshFormat exportFormat)
+    {
+        var processedCount = 0;
+        var savedCount = 0;
+        var errorCount = 0;
+        
+        FLogger.Append(ELog.Information, () =>
+        {
+            FLogger.Text($"Starting native batch export as {exportFormat} for folder: {folder.PathAtThisPoint}", Constants.BLUE);
+        });
+        
+        // 获取所有资产文件
+        var allAssets = new List<GameFile>();
+        void CollectAssets(TreeItem currentFolder)
+        {
+            allAssets.AddRange(currentFolder.AssetsList.Assets.Where(asset => asset.Extension == "uasset"));
+            foreach (var sub in currentFolder.Folders)
+            {
+                CollectAssets(sub);
+            }
+        }
+        CollectAssets(folder);
+        
+        FLogger.Append(ELog.Information, () =>
+        {
+            FLogger.Text($"Found {allAssets.Count} .uasset files to process", Constants.WHITE);
+        });
+        
+        // 逐个处理，使用与Test Single Model Export相同的方法
+        foreach (var asset in allAssets)
+        {
+            if (cancellationToken.IsCancellationRequested) break;
+            
+            processedCount++;
+            
+            FLogger.Append(ELog.Information, () =>
+            {
+                FLogger.Text($"Processing [{processedCount}/{allAssets.Count}]: {asset.Name}", Constants.YELLOW);
+            });
+            
+            try
+            {
+                // 使用与Test Single Model Export完全相同的方法
+                Extract(cancellationToken, asset, false, EBulkType.Meshes);
+                
+                savedCount++;
+                FLogger.Append(ELog.Information, () =>
+                {
+                    FLogger.Text($"✓ Exported [{savedCount}]: {asset.Name}", Constants.GREEN);
+                });
+            }
+            catch (Exception ex)
+            {
+                errorCount++;
+                FLogger.Append(ELog.Error, () =>
+                {
+                    FLogger.Text($"✗ Failed to export {asset.Name}: {ex.Message}", Constants.RED);
+                });
+            }
+            
+            // 每10个文件后进行垃圾回收
+            if (processedCount % 10 == 0)
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                Thread.Sleep(100);
+            }
+        }
+        
+        // 最终清理
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        
+        // 输出最终统计信息
+        FLogger.Append(ELog.Information, () =>
+        {
+            FLogger.Text($"Native batch export completed:", Constants.BLUE);
+            FLogger.Text($" • Export format: {exportFormat}", Constants.BLUE);
+            FLogger.Text($" • Total processed: {processedCount}", Constants.WHITE);
+            FLogger.Text($" • Successfully saved: {savedCount}", Constants.GREEN);
+            FLogger.Text($" • Errors: {errorCount}", Constants.RED);
+            FLogger.Text($" • Output directory: ", Constants.WHITE);
+            FLogger.Link(UserSettings.Default.ModelDirectory, UserSettings.Default.ModelDirectory, true);
+        });
     }
 
     // 测试单个模型导出（使用不同方法）
