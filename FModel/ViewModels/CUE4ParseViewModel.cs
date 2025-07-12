@@ -783,31 +783,76 @@ public class CUE4ParseViewModel : ViewModel
                         var dummy = ((AbstractUePackage)pkg).ConstructObject(pointer.Class?.Object?.Value as UStruct, pkg);
                         if (dummy is UStaticMesh || dummy is USkeletalMesh)
                         {
-                            // 直接导出，避免3D渲染
-                            var tempSettings = UserSettings.Default.ExportOptions;
-                            tempSettings.MeshFormat = exportFormat;
-                            var exporter = new Exporter(dummy, tempSettings);
-                            
-                            if (exporter.TryWriteToDir(new DirectoryInfo(UserSettings.Default.ModelDirectory), out var label, out var savedFilePath))
+                            FLogger.Append(ELog.Information, () =>
                             {
-                                savedCount++;
+                                FLogger.Text($"Found {dummy.ExportType}: {dummy.Name}", Constants.GRAY);
+                            });
+                            
+                            try
+                            {
+                                // 检查输出目录
+                                var outputDir = new DirectoryInfo(UserSettings.Default.ModelDirectory);
+                                if (!outputDir.Exists)
+                                {
+                                    FLogger.Append(ELog.Information, () =>
+                                    {
+                                        FLogger.Text($"Creating output directory: {outputDir.FullName}", Constants.GRAY);
+                                    });
+                                    outputDir.Create();
+                                }
+                                
+                                // 直接导出，避免3D渲染
+                                var tempSettings = UserSettings.Default.ExportOptions;
+                                tempSettings.MeshFormat = exportFormat;
+                                
                                 FLogger.Append(ELog.Information, () =>
                                 {
-                                    FLogger.Text($"✓ Saved [{savedCount}] as {exportFormat}: ", Constants.GREEN);
-                                    FLogger.Text($"{asset.Name} → ", Constants.WHITE);
-                                    FLogger.Link(label, savedFilePath, true);
+                                    FLogger.Text($"Export settings - Format: {tempSettings.MeshFormat}, Materials: {tempSettings.ExportMaterials}, MorphTargets: {tempSettings.ExportMorphTargets}", Constants.GRAY);
                                 });
-                                processed = true;
+                                
+                                var exporter = new Exporter(dummy, tempSettings);
+                                
+                                if (exporter.TryWriteToDir(outputDir, out var label, out var savedFilePath))
+                                {
+                                    savedCount++;
+                                    FLogger.Append(ELog.Information, () =>
+                                    {
+                                        FLogger.Text($"✓ Saved [{savedCount}] as {exportFormat}: ", Constants.GREEN);
+                                        FLogger.Text($"{asset.Name} → ", Constants.WHITE);
+                                        FLogger.Link(label, savedFilePath, true);
+                                    });
+                                    processed = true;
+                                }
+                                else
+                                {
+                                    errorCount++;
+                                    FLogger.Append(ELog.Warning, () =>
+                                    {
+                                        FLogger.Text($"✗ Export failed for {asset.Name}: ", Constants.YELLOW);
+                                        FLogger.Text($"TryWriteToDir returned false", Constants.YELLOW);
+                                        FLogger.Text($"Output dir: {outputDir.FullName}", Constants.GRAY);
+                                    });
+                                    processed = true;
+                                }
                             }
-                            else
+                            catch (Exception exportEx)
                             {
                                 errorCount++;
-                                FLogger.Append(ELog.Warning, () =>
+                                FLogger.Append(ELog.Error, () =>
                                 {
-                                    FLogger.Text($"✗ Failed to save: {asset.Name}", Constants.YELLOW);
+                                    FLogger.Text($"✗ Export exception for {asset.Name}: {exportEx.Message}", Constants.RED);
+                                    if (exportEx.InnerException != null)
+                                        FLogger.Text($"Inner: {exportEx.InnerException.Message}", Constants.RED);
                                 });
                                 processed = true;
                             }
+                        }
+                        else
+                        {
+                            FLogger.Append(ELog.Information, () =>
+                            {
+                                FLogger.Text($"Skipping non-mesh object: {dummy?.ExportType ?? "null"}", Constants.GRAY);
+                            });
                         }
                     }
                 }
@@ -915,6 +960,116 @@ public class CUE4ParseViewModel : ViewModel
                 FLogger.Text($"Failed to export as {formatName}: {ex.Message}", Constants.RED);
             });
             ModelAndTextureFolderWithViewer(cancellationToken, folder, UserSettings.Default.MeshExportFormat);
+        }
+    }
+
+    // 诊断和测试导出格式
+    public void DiagnoseExportFormats(CancellationToken cancellationToken, TreeItem folder)
+    {
+        FLogger.Append(ELog.Information, () =>
+        {
+            FLogger.Text("=== Export Format Diagnosis ===", Constants.BLUE);
+        });
+        
+        // 显示所有支持的格式
+        var supportedFormats = GetSupportedExportFormats();
+        FLogger.Append(ELog.Information, () =>
+        {
+            FLogger.Text($"Available formats: {string.Join(", ", supportedFormats)}", Constants.WHITE);
+        });
+        
+        // 显示当前默认格式
+        FLogger.Append(ELog.Information, () =>
+        {
+            FLogger.Text($"Current default format: {UserSettings.Default.MeshExportFormat}", Constants.WHITE);
+        });
+        
+        // 检查输出目录
+        var outputDir = UserSettings.Default.ModelDirectory;
+        FLogger.Append(ELog.Information, () =>
+        {
+            FLogger.Text($"Output directory: {outputDir}", Constants.WHITE);
+            FLogger.Text($"Directory exists: {Directory.Exists(outputDir)}", Constants.WHITE);
+        });
+        
+        // 尝试找到一个测试模型
+        var testAsset = folder.AssetsList.Assets.FirstOrDefault(asset => asset.Extension == "uasset");
+        if (testAsset != null)
+        {
+            FLogger.Append(ELog.Information, () =>
+            {
+                FLogger.Text($"Testing with asset: {testAsset.Name}", Constants.WHITE);
+            });
+            
+            // 测试不同格式
+            var testFormats = new[] { EMeshFormat.Gltf2, EMeshFormat.ActorX };
+            foreach (var format in testFormats)
+            {
+                if (supportedFormats.Contains(format))
+                {
+                    TestSingleAsset(testAsset, format);
+                }
+            }
+        }
+        
+        FLogger.Append(ELog.Information, () =>
+        {
+            FLogger.Text("=== Diagnosis Complete ===", Constants.BLUE);
+        });
+    }
+    
+    // 测试单个资产的导出
+    private void TestSingleAsset(GameFile asset, EMeshFormat format)
+    {
+        try
+        {
+            FLogger.Append(ELog.Information, () =>
+            {
+                FLogger.Text($"Testing {format} export for {asset.Name}...", Constants.YELLOW);
+            });
+            
+            var result = Provider.GetLoadPackageResult(asset);
+            for (var i = result.InclusiveStart; i < result.ExclusiveEnd; i++)
+            {
+                var pkg = result.Package;
+                var pointer = new FPackageIndex(pkg, i + 1).ResolvedObject;
+                if (pointer?.Object is null) continue;
+                
+                var dummy = ((AbstractUePackage)pkg).ConstructObject(pointer.Class?.Object?.Value as UStruct, pkg);
+                if (dummy is UStaticMesh || dummy is USkeletalMesh)
+                {
+                    var tempSettings = UserSettings.Default.ExportOptions;
+                    tempSettings.MeshFormat = format;
+                    
+                    var exporter = new Exporter(dummy, tempSettings);
+                    var outputDir = new DirectoryInfo(Path.Combine(UserSettings.Default.ModelDirectory, "test"));
+                    if (!outputDir.Exists) outputDir.Create();
+                    
+                    if (exporter.TryWriteToDir(outputDir, out var label, out var savedFilePath))
+                    {
+                        FLogger.Append(ELog.Information, () =>
+                        {
+                            FLogger.Text($"✓ {format} export successful: ", Constants.GREEN);
+                            FLogger.Link(label, savedFilePath, true);
+                        });
+                    }
+                    else
+                    {
+                        FLogger.Append(ELog.Warning, () =>
+                        {
+                            FLogger.Text($"✗ {format} export failed", Constants.YELLOW);
+                        });
+                    }
+                    break;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            FLogger.Append(ELog.Error, () =>
+            {
+                FLogger.Text($"✗ {format} test exception: {ex.Message}", Constants.RED);
+            });
         }
     }
 

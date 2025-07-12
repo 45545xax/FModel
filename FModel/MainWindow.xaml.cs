@@ -250,6 +250,14 @@ public partial class MainWindow
         }
     }
 
+    private async void OnDiagnoseExportFormatsClick(object sender, RoutedEventArgs e)
+    {
+        if (AssetsFolderName.SelectedItem is TreeItem folder)
+        {
+            await _threadWorkerView.Begin(cancellationToken => { _applicationView.CUE4Parse.DiagnoseExportFormats(cancellationToken, folder); });
+        }
+    }
+
     private async void OnFolderModelClick(object sender, RoutedEventArgs e)
     {
         if (AssetsFolderName.SelectedItem is TreeItem folder)
