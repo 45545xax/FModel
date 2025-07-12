@@ -395,15 +395,19 @@ public abstract class UModel : IRenderableModel
 
     public bool Save(out string label, out string savedFilePath)
     {
-        var TempSettings =  UserSettings.Default.ExportOptions;
-        TempSettings.MeshFormat = EMeshFormat.Gltf2;
+        return Save(out label, out savedFilePath, UserSettings.Default.MeshExportFormat);
+    }
+
+    public bool Save(out string label, out string savedFilePath, EMeshFormat meshFormat)
+    {
+        var TempSettings = UserSettings.Default.ExportOptions;
+        TempSettings.MeshFormat = meshFormat;
         var toSave = new Exporter(_export, TempSettings);
         var result = toSave.TryWriteToDir(new DirectoryInfo(UserSettings.Default.ModelDirectory), out label, out savedFilePath);
-        Console.WriteLine($"0");
+        
         // 自动导出所有引用贴图到模型同目录
         if (result && !string.IsNullOrEmpty(savedFilePath) && Materials != null)
         {
-            Console.WriteLine($"1");
             var folder = System.IO.Path.GetDirectoryName(savedFilePath);
             var format = FModel.Settings.UserSettings.Default.TextureExportFormat;
             string ext = format.ToString().ToLower();
@@ -411,7 +415,6 @@ public abstract class UModel : IRenderableModel
             foreach (var mat in Materials)
             {
                 if (mat == null) continue;
-                Console.WriteLine($"Material: {mat.Name}, Diffuse count: {mat.Diffuse?.Length}");
                 void ExportTex(FModel.Views.Snooper.Shading.Texture tex, string type)
                 {
                     if (tex != null)

@@ -553,6 +553,11 @@ public class CUE4ParseViewModel : ViewModel
 
     public void ModelAndTextureFolderWithViewer(CancellationToken cancellationToken, TreeItem folder)
     {
+        ModelAndTextureFolderWithViewer(cancellationToken, folder, UserSettings.Default.MeshExportFormat);
+    }
+
+    public void ModelAndTextureFolderWithViewer(CancellationToken cancellationToken, TreeItem folder, EMeshFormat exportFormat)
+    {
         var processedCount = 0;
         var savedCount = 0;
         var errorCount = 0;
@@ -572,7 +577,7 @@ public class CUE4ParseViewModel : ViewModel
                     processedCount++;
                     FLogger.Append(ELog.Information, () =>
                     {
-                        FLogger.Text($"Processing [{processedCount}]: {asset.Name}", Constants.YELLOW);
+                        FLogger.Text($"Processing [{processedCount}]: {asset.Name} ({exportFormat})", Constants.YELLOW);
                     });
                     
                     var result = Provider.GetLoadPackageResult(asset);
@@ -606,14 +611,14 @@ public class CUE4ParseViewModel : ViewModel
                                         var model = SnooperViewer.Renderer.Options.Models.Values.FirstOrDefault();
                                         if (model != null)
                                         {
-                                            // 自动保存模型和贴图
-                                            var saveResult = model.Save(out var label, out var savedFilePath);
+                                            // 使用指定格式自动保存模型和贴图
+                                            var saveResult = model.Save(out var label, out var savedFilePath, exportFormat);
                                             if (saveResult)
                                             {
                                                 savedCount++;
                                                 FLogger.Append(ELog.Information, () =>
                                                 {
-                                                    FLogger.Text($"✓ Saved [{savedCount}]: ", Constants.GREEN);
+                                                    FLogger.Text($"✓ Saved [{savedCount}] as {exportFormat}: ", Constants.GREEN);
                                                     FLogger.Text($"{asset.Name} → ", Constants.WHITE);
                                                     FLogger.Link(label, savedFilePath, true);
                                                 });
@@ -623,7 +628,7 @@ public class CUE4ParseViewModel : ViewModel
                                                 errorCount++;
                                                 FLogger.Append(ELog.Warning, () =>
                                                 {
-                                                    FLogger.Text($"✗ Failed to save: {asset.Name}", Constants.ORANGE);
+                                                    FLogger.Text($"✗ Failed to save as {exportFormat}: {asset.Name}", Constants.ORANGE);
                                                 });
                                             }
                                         }
@@ -687,7 +692,7 @@ public class CUE4ParseViewModel : ViewModel
         {
             FLogger.Append(ELog.Information, () =>
             {
-                FLogger.Text($"Starting batch model and texture export for folder: {folder.PathAtThisPoint}", Constants.CYAN);
+                FLogger.Text($"Starting batch model and texture export as {exportFormat} for folder: {folder.PathAtThisPoint}", Constants.CYAN);
             });
             
             ProcessFolder(folder);
@@ -696,6 +701,7 @@ public class CUE4ParseViewModel : ViewModel
             FLogger.Append(ELog.Information, () =>
             {
                 FLogger.Text($"Batch export completed:", Constants.CYAN);
+                FLogger.Text($" • Export format: {exportFormat}", Constants.CYAN);
                 FLogger.Text($" • Total processed: {processedCount}", Constants.WHITE);
                 FLogger.Text($" • Successfully saved: {savedCount}", Constants.GREEN);
                 FLogger.Text($" • Errors: {errorCount}", Constants.RED);
@@ -709,6 +715,83 @@ public class CUE4ParseViewModel : ViewModel
             {
                 FLogger.Text($"Batch export failed: {ex.Message}", Constants.RED);
             });
+        }
+    }
+
+    // 专门的FBX导出方法
+    public void ModelAndTextureFolderWithViewerAsFBX(CancellationToken cancellationToken, TreeItem folder)
+    {
+        // 尝试设置为FBX格式（如果支持）
+        // 常见的FBX格式枚举值可能是 EMeshFormat.FBX 或类似的
+        try
+        {
+            // 检查是否支持FBX格式
+            if (Enum.IsDefined(typeof(EMeshFormat), "FBX"))
+            {
+                var fbxFormat = (EMeshFormat)Enum.Parse(typeof(EMeshFormat), "FBX");
+                ModelAndTextureFolderWithViewer(cancellationToken, folder, fbxFormat);
+            }
+            else if (Enum.IsDefined(typeof(EMeshFormat), "Fbx"))
+            {
+                var fbxFormat = (EMeshFormat)Enum.Parse(typeof(EMeshFormat), "Fbx");
+                ModelAndTextureFolderWithViewer(cancellationToken, folder, fbxFormat);
+            }
+            else
+            {
+                // 如果不支持FBX，使用ActorX作为替代（通常兼容性较好）
+                FLogger.Append(ELog.Warning, () =>
+                {
+                    FLogger.Text("FBX format not directly supported, using ActorX format instead", Constants.ORANGE);
+                });
+                ModelAndTextureFolderWithViewer(cancellationToken, folder, EMeshFormat.ActorX);
+            }
+        }
+        catch (Exception ex)
+        {
+            FLogger.Append(ELog.Error, () =>
+            {
+                FLogger.Text($"Failed to use FBX format, falling back to default: {ex.Message}", Constants.RED);
+            });
+            ModelAndTextureFolderWithViewer(cancellationToken, folder, UserSettings.Default.MeshExportFormat);
+        }
+    }
+
+    // 获取支持的导出格式列表
+    public List<EMeshFormat> GetSupportedExportFormats()
+    {
+        var formats = new List<EMeshFormat>();
+        foreach (EMeshFormat format in Enum.GetValues(typeof(EMeshFormat)))
+        {
+            formats.Add(format);
+        }
+        return formats;
+    }
+
+    // 通用的导出方法，可以指定任何格式
+    public void ModelAndTextureFolderWithViewerAsFormat(CancellationToken cancellationToken, TreeItem folder, string formatName)
+    {
+        try
+        {
+            if (Enum.TryParse<EMeshFormat>(formatName, true, out var format))
+            {
+                ModelAndTextureFolderWithViewer(cancellationToken, folder, format);
+            }
+            else
+            {
+                FLogger.Append(ELog.Error, () =>
+                {
+                    FLogger.Text($"Unsupported format: {formatName}. Using default format.", Constants.RED);
+                });
+                ModelAndTextureFolderWithViewer(cancellationToken, folder, UserSettings.Default.MeshExportFormat);
+            }
+        }
+        catch (Exception ex)
+        {
+            FLogger.Append(ELog.Error, () =>
+            {
+                FLogger.Text($"Failed to export as {formatName}: {ex.Message}", Constants.RED);
+            });
+            ModelAndTextureFolderWithViewer(cancellationToken, folder, UserSettings.Default.MeshExportFormat);
         }
     }
 

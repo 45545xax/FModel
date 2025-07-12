@@ -224,6 +224,19 @@ public partial class MainWindow
             }
     }
 
+    private async void OnFolderModelAndTextureAsFBXClick(object sender, RoutedEventArgs e)
+    {
+        if (AssetsFolderName.SelectedItem is TreeItem folder)
+        {
+            await _threadWorkerView.Begin(cancellationToken => { _applicationView.CUE4Parse.ModelAndTextureFolderWithViewerAsFBX(cancellationToken, folder); });
+            FLogger.Append(ELog.Information, () =>
+            {
+                FLogger.Text("Successfully saved models as FBX from ", Constants.WHITE);
+                FLogger.Link(folder.PathAtThisPoint, UserSettings.Default.ModelDirectory, true);
+            });
+        }
+    }
+
     private async void OnFolderModelClick(object sender, RoutedEventArgs e)
     {
         if (AssetsFolderName.SelectedItem is TreeItem folder)
