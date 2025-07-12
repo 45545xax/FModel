@@ -237,6 +237,19 @@ public partial class MainWindow
         }
     }
 
+    private async void OnFolderModelAndTextureSafeClick(object sender, RoutedEventArgs e)
+    {
+        if (AssetsFolderName.SelectedItem is TreeItem folder)
+        {
+            await _threadWorkerView.Begin(cancellationToken => { _applicationView.CUE4Parse.ModelAndTextureFolderSafe(cancellationToken, folder, UserSettings.Default.MeshExportFormat); });
+            FLogger.Append(ELog.Information, () =>
+            {
+                FLogger.Text("Successfully saved models in safe mode from ", Constants.WHITE);
+                FLogger.Link(folder.PathAtThisPoint, UserSettings.Default.ModelDirectory, true);
+            });
+        }
+    }
+
     private async void OnFolderModelClick(object sender, RoutedEventArgs e)
     {
         if (AssetsFolderName.SelectedItem is TreeItem folder)

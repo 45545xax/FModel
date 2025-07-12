@@ -591,80 +591,52 @@ public class CUE4ParseViewModel : ViewModel
                         // 只处理静态/骨骼模型
                         if (dummy is UStaticMesh || dummy is USkeletalMesh)
                         {
-                            if (SnooperViewer.TryLoadExport(cancellationToken, dummy, pointer.Object))
+                            // 直接使用导出功能，避免3D Viewer相关的内存问题
+                            try
                             {
-                                try
+                                // 直接使用Export功能，绕过3D Viewer的内存管理问题
+                                var tempSettings = UserSettings.Default.ExportOptions;
+                                tempSettings.MeshFormat = exportFormat;
+                                var exporter = new Exporter(dummy, tempSettings);
+                                
+                                if (exporter.TryWriteToDir(new DirectoryInfo(UserSettings.Default.ModelDirectory), out var label, out var savedFilePath))
                                 {
-                                    // 初始化3D环境但不显示窗口
-                                    SnooperViewer.WindowShouldFreeze(true);
-                                    
-                                    // 等待模型加载完成
-                                    var timeout = 0;
-                                    while (SnooperViewer.Renderer.Options.Models.Count == 0 && timeout < 50)
+                                    savedCount++;
+                                    FLogger.Append(ELog.Information, () =>
                                     {
-                                        Thread.Sleep(100);
-                                        timeout++;
-                                    }
-                                    
-                                    if (SnooperViewer.Renderer.Options.Models.Count > 0)
-                                    {
-                                        var model = SnooperViewer.Renderer.Options.Models.Values.FirstOrDefault();
-                                        if (model != null)
-                                        {
-                                            // 使用指定格式自动保存模型和贴图
-                                            var saveResult = model.Save(out var label, out var savedFilePath, exportFormat);
-                                            if (saveResult)
-                                            {
-                                                savedCount++;
-                                                FLogger.Append(ELog.Information, () =>
-                                                {
-                                                    FLogger.Text($"✓ Saved [{savedCount}] as {exportFormat}: ", Constants.GREEN);
-                                                    FLogger.Text($"{asset.Name} → ", Constants.WHITE);
-                                                    FLogger.Link(label, savedFilePath, true);
-                                                });
-                                            }
-                                            else
-                                            {
-                                                errorCount++;
-                                                FLogger.Append(ELog.Warning, () =>
-                                                {
-                                                    FLogger.Text($"✗ Failed to save as {exportFormat}: {asset.Name}", Constants.ORANGE);
-                                                });
-                                            }
-                                        }
-                                    }
-                                    else
-                                    {
-                                        errorCount++;
-                                        FLogger.Append(ELog.Warning, () =>
-                                        {
-                                            FLogger.Text($"✗ No models loaded for: {asset.Name}", Constants.ORANGE);
-                                        });
-                                    }
-                                    
-                                    // 清理3D Viewer资源
-                                    SnooperViewer.WindowShouldClose(true, true);
-                                    
-                                    // 短暂等待确保资源清理完成
-                                    Thread.Sleep(200);
+                                        FLogger.Text($"✓ Saved [{savedCount}] as {exportFormat}: ", Constants.GREEN);
+                                        FLogger.Text($"{asset.Name} → ", Constants.WHITE);
+                                        FLogger.Link(label, savedFilePath, true);
+                                    });
                                 }
-                                catch (Exception ex)
+                                else
                                 {
                                     errorCount++;
-                                    FLogger.Append(ELog.Error, () =>
+                                    FLogger.Append(ELog.Warning, () =>
                                     {
-                                        FLogger.Text($"✗ Error processing 3D viewer for: {asset.Name} - {ex.Message}", Constants.RED);
+                                        FLogger.Text($"✗ Failed to save as {exportFormat}: {asset.Name}", Constants.ORANGE);
                                     });
-                                    
-                                    // 确保在异常时也能清理资源
-                                    try { SnooperViewer.WindowShouldClose(true, true); } catch { }
                                 }
                             }
-                            else
+                            catch (AccessViolationException ex)
                             {
-                                FLogger.Append(ELog.Warning, () =>
+                                errorCount++;
+                                FLogger.Append(ELog.Error, () =>
                                 {
-                                    FLogger.Text($"✗ Cannot load 3D model: {asset.Name}", Constants.ORANGE);
+                                    FLogger.Text($"✗ Memory access error for: {asset.Name} - {ex.Message}", Constants.RED);
+                                });
+                                
+                                // 强制垃圾回收以清理可能的内存问题
+                                GC.Collect();
+                                GC.WaitForPendingFinalizers();
+                                GC.Collect();
+                            }
+                            catch (Exception ex)
+                            {
+                                errorCount++;
+                                FLogger.Append(ELog.Error, () =>
+                                {
+                                    FLogger.Text($"✗ Error saving model: {asset.Name} - {ex.Message}", Constants.RED);
                                 });
                             }
                             break; // 找到第一个可用模型后退出循环
@@ -718,7 +690,7 @@ public class CUE4ParseViewModel : ViewModel
         }
     }
 
-    // 专门的FBX导出方法
+    // 专门的FBX导出方法（使用安全版本）
     public void ModelAndTextureFolderWithViewerAsFBX(CancellationToken cancellationToken, TreeItem folder)
     {
         // 尝试设置为FBX格式（如果支持）
@@ -729,12 +701,12 @@ public class CUE4ParseViewModel : ViewModel
             if (Enum.IsDefined(typeof(EMeshFormat), "FBX"))
             {
                 var fbxFormat = (EMeshFormat)Enum.Parse(typeof(EMeshFormat), "FBX");
-                ModelAndTextureFolderWithViewer(cancellationToken, folder, fbxFormat);
+                ModelAndTextureFolderSafe(cancellationToken, folder, fbxFormat);
             }
             else if (Enum.IsDefined(typeof(EMeshFormat), "Fbx"))
             {
                 var fbxFormat = (EMeshFormat)Enum.Parse(typeof(EMeshFormat), "Fbx");
-                ModelAndTextureFolderWithViewer(cancellationToken, folder, fbxFormat);
+                ModelAndTextureFolderSafe(cancellationToken, folder, fbxFormat);
             }
             else
             {
@@ -743,17 +715,167 @@ public class CUE4ParseViewModel : ViewModel
                 {
                     FLogger.Text("FBX format not directly supported, using ActorX format instead", Constants.ORANGE);
                 });
-                ModelAndTextureFolderWithViewer(cancellationToken, folder, EMeshFormat.ActorX);
+                ModelAndTextureFolderSafe(cancellationToken, folder, EMeshFormat.ActorX);
             }
         }
         catch (Exception ex)
         {
             FLogger.Append(ELog.Error, () =>
             {
-                FLogger.Text($"Failed to use FBX format, falling back to default: {ex.Message}", Constants.RED);
+                FLogger.Text($"Failed to use FBX format, falling back to safe export: {ex.Message}", Constants.RED);
             });
-            ModelAndTextureFolderWithViewer(cancellationToken, folder, UserSettings.Default.MeshExportFormat);
+            ModelAndTextureFolderSafe(cancellationToken, folder, UserSettings.Default.MeshExportFormat);
         }
+    }
+
+    // 内存安全的批量导出方法
+    public void ModelAndTextureFolderSafe(CancellationToken cancellationToken, TreeItem folder, EMeshFormat exportFormat)
+    {
+        var processedCount = 0;
+        var savedCount = 0;
+        var errorCount = 0;
+        
+        FLogger.Append(ELog.Information, () =>
+        {
+            FLogger.Text($"Starting safe batch export as {exportFormat} for folder: {folder.PathAtThisPoint}", Constants.CYAN);
+        });
+        
+        // 获取所有资产文件
+        var allAssets = new List<GameFile>();
+        void CollectAssets(TreeItem currentFolder)
+        {
+            allAssets.AddRange(currentFolder.AssetsList.Assets.Where(asset => asset.Extension == "uasset" || asset.Extension == "umap"));
+            foreach (var sub in currentFolder.Folders)
+            {
+                CollectAssets(sub);
+            }
+        }
+        CollectAssets(folder);
+        
+        // 逐个处理，每处理一定数量后强制GC
+        const int batchSize = 10;
+        for (int i = 0; i < allAssets.Count; i++)
+        {
+            if (cancellationToken.IsCancellationRequested) break;
+            
+            var asset = allAssets[i];
+            processedCount++;
+            
+            try
+            {
+                FLogger.Append(ELog.Information, () =>
+                {
+                    FLogger.Text($"Processing [{processedCount}/{allAssets.Count}]: {asset.Name}", Constants.YELLOW);
+                });
+                
+                // 使用单独的try-catch包围每个模型处理
+                bool processed = false;
+                try
+                {
+                    var result = Provider.GetLoadPackageResult(asset);
+                    for (var j = result.InclusiveStart; j < result.ExclusiveEnd && !processed; j++)
+                    {
+                        var pkg = result.Package;
+                        var pointer = new FPackageIndex(pkg, j + 1).ResolvedObject;
+                        if (pointer?.Object is null) continue;
+                        
+                        var dummy = ((AbstractUePackage)pkg).ConstructObject(pointer.Class?.Object?.Value as UStruct, pkg);
+                        if (dummy is UStaticMesh || dummy is USkeletalMesh)
+                        {
+                            // 直接导出，避免3D渲染
+                            var tempSettings = UserSettings.Default.ExportOptions;
+                            tempSettings.MeshFormat = exportFormat;
+                            var exporter = new Exporter(dummy, tempSettings);
+                            
+                            if (exporter.TryWriteToDir(new DirectoryInfo(UserSettings.Default.ModelDirectory), out var label, out var savedFilePath))
+                            {
+                                savedCount++;
+                                FLogger.Append(ELog.Information, () =>
+                                {
+                                    FLogger.Text($"✓ Saved [{savedCount}] as {exportFormat}: ", Constants.GREEN);
+                                    FLogger.Text($"{asset.Name} → ", Constants.WHITE);
+                                    FLogger.Link(label, savedFilePath, true);
+                                });
+                                processed = true;
+                            }
+                            else
+                            {
+                                errorCount++;
+                                FLogger.Append(ELog.Warning, () =>
+                                {
+                                    FLogger.Text($"✗ Failed to save: {asset.Name}", Constants.ORANGE);
+                                });
+                                processed = true;
+                            }
+                        }
+                    }
+                }
+                catch (AccessViolationException ex)
+                {
+                    errorCount++;
+                    FLogger.Append(ELog.Error, () =>
+                    {
+                        FLogger.Text($"✗ Memory access error: {asset.Name} - {ex.Message}", Constants.RED);
+                    });
+                }
+                catch (OutOfMemoryException ex)
+                {
+                    errorCount++;
+                    FLogger.Append(ELog.Error, () =>
+                    {
+                        FLogger.Text($"✗ Out of memory: {asset.Name} - {ex.Message}", Constants.RED);
+                    });
+                    
+                    // 强制垃圾回收
+                    GC.Collect();
+                    GC.WaitForPendingFinalizers();
+                    GC.Collect();
+                }
+                catch (Exception ex)
+                {
+                    errorCount++;
+                    FLogger.Append(ELog.Error, () =>
+                    {
+                        FLogger.Text($"✗ Error: {asset.Name} - {ex.Message}", Constants.RED);
+                    });
+                }
+                
+                // 每处理一定数量的文件后进行垃圾回收
+                if (i % batchSize == 0 && i > 0)
+                {
+                    GC.Collect();
+                    GC.WaitForPendingFinalizers();
+                    
+                    // 短暂休息以释放系统资源
+                    Thread.Sleep(100);
+                }
+            }
+            catch (Exception ex)
+            {
+                errorCount++;
+                FLogger.Append(ELog.Error, () =>
+                {
+                    FLogger.Text($"✗ Critical error processing: {asset.Name} - {ex.Message}", Constants.RED);
+                });
+            }
+        }
+        
+        // 最终清理
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        
+        // 输出最终统计信息
+        FLogger.Append(ELog.Information, () =>
+        {
+            FLogger.Text($"Safe batch export completed:", Constants.CYAN);
+            FLogger.Text($" • Export format: {exportFormat}", Constants.CYAN);
+            FLogger.Text($" • Total processed: {processedCount}", Constants.WHITE);
+            FLogger.Text($" • Successfully saved: {savedCount}", Constants.GREEN);
+            FLogger.Text($" • Errors: {errorCount}", Constants.RED);
+            FLogger.Text($" • Output directory: ", Constants.WHITE);
+            FLogger.Link(UserSettings.Default.ModelDirectory, UserSettings.Default.ModelDirectory, true);
+        });
     }
 
     // 获取支持的导出格式列表
