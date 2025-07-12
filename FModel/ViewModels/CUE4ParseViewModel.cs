@@ -1048,57 +1048,100 @@ public class CUE4ParseViewModel : ViewModel
         
         FLogger.Append(ELog.Information, () =>
         {
-            FLogger.Text($"Starting native batch export (models + textures) as {exportFormat} for current folder only: {folder.PathAtThisPoint}", Constants.BLUE);
+            FLogger.Text($"Starting recursive batch export (models + textures) as {exportFormat} for folder: {folder.PathAtThisPoint}", Constants.BLUE);
         });
         
-        // 只获取当前文件夹的资产文件，不递归遍历子文件夹
-        var currentFolderAssets = folder.AssetsList.Assets.Where(asset => asset.Extension == "uasset").ToList();
+        // 递归收集所有子文件夹的资产文件
+        var allAssets = new List<GameFile>();
+        void CollectAssets(TreeItem currentFolder)
+        {
+            allAssets.AddRange(currentFolder.AssetsList.Assets.Where(asset => asset.Extension == "uasset"));
+            foreach (var sub in currentFolder.Folders)
+            {
+                CollectAssets(sub);
+            }
+        }
+        CollectAssets(folder);
         
         FLogger.Append(ELog.Information, () =>
         {
-            FLogger.Text($"Found {currentFolderAssets.Count} .uasset files in current folder", Constants.WHITE);
-            FLogger.Text($"Will export models and their referenced textures", Constants.WHITE);
+            FLogger.Text($"Found {allAssets.Count} .uasset files (recursive)", Constants.WHITE);
+            FLogger.Text($"Each model and its textures will be saved in a separate folder", Constants.WHITE);
         });
         
-        // 逐个处理，使用与Test Single Model Export相同的方法
-        foreach (var asset in currentFolderAssets)
+        // 保存原始设置
+        var originalModelDir = UserSettings.Default.ModelDirectory;
+        var originalTextureDir = UserSettings.Default.TextureDirectory;
+        var originalKeepStructure = UserSettings.Default.KeepDirectoryStructure;
+        
+        try
         {
-            if (cancellationToken.IsCancellationRequested) break;
+            // 临时禁用目录结构保持，让我们自己控制路径
+            UserSettings.Default.KeepDirectoryStructure = false;
             
-            processedCount++;
-            
-            FLogger.Append(ELog.Information, () =>
+            // 逐个处理，使用与Test Single Model Export相同的方法
+            foreach (var asset in allAssets)
             {
-                FLogger.Text($"Processing [{processedCount}/{currentFolderAssets.Count}]: {asset.Name}", Constants.YELLOW);
-            });
-            
-            try
-            {
-                // 使用组合的EBulkType标志同时导出模型和贴图
-                Extract(cancellationToken, asset, false, EBulkType.Meshes | EBulkType.Textures);
+                if (cancellationToken.IsCancellationRequested) break;
                 
-                savedCount++;
+                processedCount++;
+                
                 FLogger.Append(ELog.Information, () =>
                 {
-                    FLogger.Text($"✓ Exported [{savedCount}]: {asset.Name} (models and textures)", Constants.GREEN);
+                    FLogger.Text($"Processing [{processedCount}/{allAssets.Count}]: {asset.Name}", Constants.YELLOW);
                 });
-            }
-            catch (Exception ex)
-            {
-                errorCount++;
-                FLogger.Append(ELog.Error, () =>
+                
+                try
                 {
-                    FLogger.Text($"✗ Failed to export {asset.Name}: {ex.Message}", Constants.RED);
-                });
+                    // 为每个模型创建单独的文件夹
+                    var modelName = asset.NameWithoutExtension;
+                    var modelOutputDir = Path.Combine(originalModelDir, modelName);
+                    
+                    // 临时设置输出目录到模型专用文件夹
+                    UserSettings.Default.ModelDirectory = modelOutputDir;
+                    UserSettings.Default.TextureDirectory = modelOutputDir; // 贴图也放在同一个文件夹
+                    
+                    // 确保目录存在
+                    Directory.CreateDirectory(modelOutputDir);
+                    
+                    FLogger.Append(ELog.Information, () =>
+                    {
+                        FLogger.Text($"  Output folder: {modelName}/", Constants.GRAY);
+                    });
+                    
+                    // 使用组合的EBulkType标志同时导出模型和贴图
+                    Extract(cancellationToken, asset, false, EBulkType.Meshes | EBulkType.Textures);
+                    
+                    savedCount++;
+                    FLogger.Append(ELog.Information, () =>
+                    {
+                        FLogger.Text($"✓ Exported [{savedCount}]: {asset.Name} → {modelName}/", Constants.GREEN);
+                    });
+                }
+                catch (Exception ex)
+                {
+                    errorCount++;
+                    FLogger.Append(ELog.Error, () =>
+                    {
+                        FLogger.Text($"✗ Failed to export {asset.Name}: {ex.Message}", Constants.RED);
+                    });
+                }
+                
+                // 每10个文件后进行垃圾回收
+                if (processedCount % 10 == 0)
+                {
+                    GC.Collect();
+                    GC.WaitForPendingFinalizers();
+                    Thread.Sleep(100);
+                }
             }
-            
-            // 每10个文件后进行垃圾回收
-            if (processedCount % 10 == 0)
-            {
-                GC.Collect();
-                GC.WaitForPendingFinalizers();
-                Thread.Sleep(100);
-            }
+        }
+        finally
+        {
+            // 恢复原始设置
+            UserSettings.Default.ModelDirectory = originalModelDir;
+            UserSettings.Default.TextureDirectory = originalTextureDir;
+            UserSettings.Default.KeepDirectoryStructure = originalKeepStructure;
         }
         
         // 最终清理
@@ -1109,14 +1152,15 @@ public class CUE4ParseViewModel : ViewModel
         // 输出最终统计信息
         FLogger.Append(ELog.Information, () =>
         {
-            FLogger.Text($"Native batch export completed:", Constants.BLUE);
+            FLogger.Text($"Recursive batch export completed:", Constants.BLUE);
             FLogger.Text($" • Export format: {exportFormat}", Constants.BLUE);
-            FLogger.Text($" • Current folder only: {folder.PathAtThisPoint}", Constants.BLUE);
+            FLogger.Text($" • Source folder: {folder.PathAtThisPoint}", Constants.BLUE);
             FLogger.Text($" • Total processed: {processedCount}", Constants.WHITE);
             FLogger.Text($" • Successfully saved: {savedCount}", Constants.GREEN);
             FLogger.Text($" • Errors: {errorCount}", Constants.RED);
             FLogger.Text($" • Output directory: ", Constants.WHITE);
-            FLogger.Link(UserSettings.Default.ModelDirectory, UserSettings.Default.ModelDirectory, true);
+            FLogger.Link(originalModelDir, originalModelDir, true);
+            FLogger.Text($" • Each model saved in its own subfolder with textures", Constants.GRAY);
         });
     }
 
