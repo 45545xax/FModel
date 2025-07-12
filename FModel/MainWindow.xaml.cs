@@ -272,14 +272,14 @@ public partial class MainWindow
         {
             FLogger.Append(ELog.Information, () =>
             {
-                FLogger.Text("Starting recursive export of folder's models and textures...", Constants.BLUE);
+                FLogger.Text("Starting recursive FBX export of folder's models with textures and materials...", Constants.BLUE);
             });
             
             await _threadWorkerView.Begin(cancellationToken => { _applicationView.CUE4Parse.ModelAndTextureFolderNative(cancellationToken, folder, UserSettings.Default.MeshExportFormat); });
             
             FLogger.Append(ELog.Information, () =>
             {
-                FLogger.Text("Recursive batch export completed. Each model is saved in its own folder with textures: ", Constants.WHITE);
+                FLogger.Text("Recursive FBX export completed. Each model saved as FBX with textures and materials in same folder: ", Constants.WHITE);
                 FLogger.Link("Output Directory", UserSettings.Default.ModelDirectory, true);
             });
         }

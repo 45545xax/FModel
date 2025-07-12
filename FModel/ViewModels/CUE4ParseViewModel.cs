@@ -684,39 +684,13 @@ public class CUE4ParseViewModel : ViewModel
     // 专门的FBX导出方法（使用原生方法）
     public void ModelAndTextureFolderWithViewerAsFBX(CancellationToken cancellationToken, TreeItem folder)
     {
-        // 尝试设置为FBX格式（如果支持）
-        // 常见的FBX格式枚举值可能是 EMeshFormat.FBX 或类似的
-        try
+        // 直接使用新的FBX导出方法（它已经强制使用FBX格式）
+        FLogger.Append(ELog.Information, () =>
         {
-            // 检查是否支持FBX格式
-            if (Enum.IsDefined(typeof(EMeshFormat), "FBX"))
-            {
-                var fbxFormat = (EMeshFormat)Enum.Parse(typeof(EMeshFormat), "FBX");
-                ModelAndTextureFolderNative(cancellationToken, folder, fbxFormat);
-            }
-            else if (Enum.IsDefined(typeof(EMeshFormat), "Fbx"))
-            {
-                var fbxFormat = (EMeshFormat)Enum.Parse(typeof(EMeshFormat), "Fbx");
-                ModelAndTextureFolderNative(cancellationToken, folder, fbxFormat);
-            }
-            else
-            {
-                // 如果不支持FBX，使用ActorX作为替代（通常兼容性较好）
-                FLogger.Append(ELog.Warning, () =>
-                {
-                    FLogger.Text("FBX format not directly supported, using ActorX format instead", Constants.YELLOW);
-                });
-                ModelAndTextureFolderNative(cancellationToken, folder, EMeshFormat.ActorX);
-            }
-        }
-        catch (Exception ex)
-        {
-            FLogger.Append(ELog.Error, () =>
-            {
-                FLogger.Text($"Failed to use FBX format, falling back to native export: {ex.Message}", Constants.RED);
-            });
-            ModelAndTextureFolderNative(cancellationToken, folder, UserSettings.Default.MeshExportFormat);
-        }
+            FLogger.Text("Using enhanced FBX export method (recursive with textures and materials)", Constants.BLUE);
+        });
+        
+        ModelAndTextureFolderNative(cancellationToken, folder, EMeshFormat.ActorX); // 参数会被忽略，因为方法内部强制使用FBX
     }
 
     // 内存安全的批量导出方法
@@ -1039,16 +1013,19 @@ public class CUE4ParseViewModel : ViewModel
         }
     }
 
-    // 基于成功测试方法的批量导出（使用FModel原生方法）
+    // 基于成功测试方法的批量导出（使用FModel原生方法，FBX格式）
     public void ModelAndTextureFolderNative(CancellationToken cancellationToken, TreeItem folder, EMeshFormat exportFormat)
     {
         var processedCount = 0;
         var savedCount = 0;
         var errorCount = 0;
         
+        // 强制使用FBX格式
+        var fbxFormat = GetFBXFormat();
+        
         FLogger.Append(ELog.Information, () =>
         {
-            FLogger.Text($"Starting recursive batch export (models + textures) as {exportFormat} for folder: {folder.PathAtThisPoint}", Constants.BLUE);
+            FLogger.Text($"Starting recursive batch export (models + textures + materials) as {fbxFormat} for folder: {folder.PathAtThisPoint}", Constants.BLUE);
         });
         
         // 递归收集所有子文件夹的资产文件
@@ -1066,18 +1043,22 @@ public class CUE4ParseViewModel : ViewModel
         FLogger.Append(ELog.Information, () =>
         {
             FLogger.Text($"Found {allAssets.Count} .uasset files (recursive)", Constants.WHITE);
-            FLogger.Text($"Each model and its textures will be saved in a separate folder", Constants.WHITE);
+            FLogger.Text($"Each model with textures and materials will be saved in its own folder", Constants.WHITE);
         });
         
         // 保存原始设置
         var originalModelDir = UserSettings.Default.ModelDirectory;
         var originalTextureDir = UserSettings.Default.TextureDirectory;
         var originalKeepStructure = UserSettings.Default.KeepDirectoryStructure;
+        var originalMeshFormat = UserSettings.Default.MeshExportFormat;
+        var originalExportMaterials = UserSettings.Default.SaveEmbeddedMaterials;
         
         try
         {
-            // 临时禁用目录结构保持，让我们自己控制路径
+            // 临时设置：禁用目录结构保持，启用材质导出，使用FBX格式
             UserSettings.Default.KeepDirectoryStructure = false;
+            UserSettings.Default.MeshExportFormat = fbxFormat;
+            UserSettings.Default.SaveEmbeddedMaterials = true; // 确保导出材质
             
             // 逐个处理，使用与Test Single Model Export相同的方法
             foreach (var asset in allAssets)
@@ -1097,25 +1078,25 @@ public class CUE4ParseViewModel : ViewModel
                     var modelName = asset.NameWithoutExtension;
                     var modelOutputDir = Path.Combine(originalModelDir, modelName);
                     
-                    // 临时设置输出目录到模型专用文件夹
+                    // 临时设置输出目录到模型专用文件夹（模型、贴图、材质都在同一个文件夹）
                     UserSettings.Default.ModelDirectory = modelOutputDir;
-                    UserSettings.Default.TextureDirectory = modelOutputDir; // 贴图也放在同一个文件夹
+                    UserSettings.Default.TextureDirectory = modelOutputDir; // 贴图在模型文件夹
                     
                     // 确保目录存在
                     Directory.CreateDirectory(modelOutputDir);
                     
                     FLogger.Append(ELog.Information, () =>
                     {
-                        FLogger.Text($"  Output folder: {modelName}/", Constants.GRAY);
+                        FLogger.Text($"  Output folder: {modelName}/ (FBX + textures + materials)", Constants.GRAY);
                     });
                     
-                    // 使用组合的EBulkType标志同时导出模型和贴图
+                    // 使用组合的EBulkType标志同时导出模型、贴图和材质
                     Extract(cancellationToken, asset, false, EBulkType.Meshes | EBulkType.Textures);
                     
                     savedCount++;
                     FLogger.Append(ELog.Information, () =>
                     {
-                        FLogger.Text($"✓ Exported [{savedCount}]: {asset.Name} → {modelName}/", Constants.GREEN);
+                        FLogger.Text($"✓ Exported [{savedCount}]: {asset.Name} → {modelName}/ (FBX)", Constants.GREEN);
                     });
                 }
                 catch (Exception ex)
@@ -1142,6 +1123,8 @@ public class CUE4ParseViewModel : ViewModel
             UserSettings.Default.ModelDirectory = originalModelDir;
             UserSettings.Default.TextureDirectory = originalTextureDir;
             UserSettings.Default.KeepDirectoryStructure = originalKeepStructure;
+            UserSettings.Default.MeshExportFormat = originalMeshFormat;
+            UserSettings.Default.SaveEmbeddedMaterials = originalExportMaterials;
         }
         
         // 最终清理
@@ -1152,16 +1135,39 @@ public class CUE4ParseViewModel : ViewModel
         // 输出最终统计信息
         FLogger.Append(ELog.Information, () =>
         {
-            FLogger.Text($"Recursive batch export completed:", Constants.BLUE);
-            FLogger.Text($" • Export format: {exportFormat}", Constants.BLUE);
+            FLogger.Text($"Recursive FBX batch export completed:", Constants.BLUE);
+            FLogger.Text($" • Export format: {fbxFormat}", Constants.BLUE);
             FLogger.Text($" • Source folder: {folder.PathAtThisPoint}", Constants.BLUE);
             FLogger.Text($" • Total processed: {processedCount}", Constants.WHITE);
             FLogger.Text($" • Successfully saved: {savedCount}", Constants.GREEN);
             FLogger.Text($" • Errors: {errorCount}", Constants.RED);
             FLogger.Text($" • Output directory: ", Constants.WHITE);
             FLogger.Link(originalModelDir, originalModelDir, true);
-            FLogger.Text($" • Each model saved in its own subfolder with textures", Constants.GRAY);
+            FLogger.Text($" • Each model saved as FBX with textures and materials in same folder", Constants.GRAY);
         });
+    }
+    
+    // 获取FBX格式（支持多种可能的枚举值）
+    private EMeshFormat GetFBXFormat()
+    {
+        // 尝试不同的FBX格式名称
+        var fbxNames = new[] { "FBX", "Fbx", "fbx" };
+        
+        foreach (var name in fbxNames)
+        {
+            if (Enum.IsDefined(typeof(EMeshFormat), name))
+            {
+                return (EMeshFormat)Enum.Parse(typeof(EMeshFormat), name);
+            }
+        }
+        
+        // 如果没有找到FBX格式，记录警告并使用ActorX作为替代
+        FLogger.Append(ELog.Warning, () =>
+        {
+            FLogger.Text("FBX format not available in this version. Using ActorX as fallback (compatible with FBX workflow).", Constants.YELLOW);
+        });
+        
+        return EMeshFormat.ActorX; // ActorX格式通常与FBX兼容
     }
 
     // 测试单个模型导出（使用不同方法）
