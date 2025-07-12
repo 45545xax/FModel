@@ -553,14 +553,28 @@ public class CUE4ParseViewModel : ViewModel
 
     public void ModelAndTextureFolderWithViewer(CancellationToken cancellationToken, TreeItem folder)
     {
+        var processedCount = 0;
+        var savedCount = 0;
+        var errorCount = 0;
+        
         // 递归遍历当前文件夹及所有子文件夹下的所有模型
         void ProcessFolder(TreeItem currentFolder)
         {
+            if (cancellationToken.IsCancellationRequested) return;
+            
             var assets = currentFolder.AssetsList.Assets.Where(asset => asset.Extension == "uasset" || asset.Extension == "umap").ToList();
             foreach (var asset in assets)
             {
+                if (cancellationToken.IsCancellationRequested) return;
+                
                 try
                 {
+                    processedCount++;
+                    FLogger.Append(ELog.Information, () =>
+                    {
+                        FLogger.Text($"Processing [{processedCount}]: {asset.Name}", Constants.YELLOW);
+                    });
+                    
                     var result = Provider.GetLoadPackageResult(asset);
                     for (var i = result.InclusiveStart; i < result.ExclusiveEnd; i++)
                     {
@@ -568,45 +582,134 @@ public class CUE4ParseViewModel : ViewModel
                         var pointer = new FPackageIndex(pkg, i + 1).ResolvedObject;
                         if (pointer?.Object is null) continue;
                         var dummy = ((AbstractUePackage)pkg).ConstructObject(pointer.Class?.Object?.Value as UStruct, pkg);
+                        
                         // 只处理静态/骨骼模型
                         if (dummy is UStaticMesh || dummy is USkeletalMesh)
                         {
                             if (SnooperViewer.TryLoadExport(cancellationToken, dummy, pointer.Object))
                             {
-                                SnooperViewer.Run(); // 初始化3D环境
-                                                     // 获取UModel实例并自动保存
-                                Thread.Sleep(1000); // 确保模型已加载
-                                var models = SnooperViewer.Renderer.Options.Models.Values.ToList();
-                                if (models.Count > 0)
+                                try
                                 {
-                                    var model = models[0];
-                                    model.Save(out var label, out var savedFilePath);
-                                    FLogger.Append(ELog.Information, () =>
+                                    // 初始化3D环境但不显示窗口
+                                    SnooperViewer.WindowShouldFreeze(true);
+                                    
+                                    // 等待模型加载完成
+                                    var timeout = 0;
+                                    while (SnooperViewer.Renderer.Options.Models.Count == 0 && timeout < 50)
                                     {
-                                        FLogger.Text($"Auto saved model and textures: {asset.Name}", Constants.WHITE);
+                                        Thread.Sleep(100);
+                                        timeout++;
+                                    }
+                                    
+                                    if (SnooperViewer.Renderer.Options.Models.Count > 0)
+                                    {
+                                        var model = SnooperViewer.Renderer.Options.Models.Values.FirstOrDefault();
+                                        if (model != null)
+                                        {
+                                            // 自动保存模型和贴图
+                                            var saveResult = model.Save(out var label, out var savedFilePath);
+                                            if (saveResult)
+                                            {
+                                                savedCount++;
+                                                FLogger.Append(ELog.Information, () =>
+                                                {
+                                                    FLogger.Text($"✓ Saved [{savedCount}]: ", Constants.GREEN);
+                                                    FLogger.Text($"{asset.Name} → ", Constants.WHITE);
+                                                    FLogger.Link(label, savedFilePath, true);
+                                                });
+                                            }
+                                            else
+                                            {
+                                                errorCount++;
+                                                FLogger.Append(ELog.Warning, () =>
+                                                {
+                                                    FLogger.Text($"✗ Failed to save: {asset.Name}", Constants.ORANGE);
+                                                });
+                                            }
+                                        }
+                                    }
+                                    else
+                                    {
+                                        errorCount++;
+                                        FLogger.Append(ELog.Warning, () =>
+                                        {
+                                            FLogger.Text($"✗ No models loaded for: {asset.Name}", Constants.ORANGE);
+                                        });
+                                    }
+                                    
+                                    // 清理3D Viewer资源
+                                    SnooperViewer.WindowShouldClose(true, true);
+                                    
+                                    // 短暂等待确保资源清理完成
+                                    Thread.Sleep(200);
+                                }
+                                catch (Exception ex)
+                                {
+                                    errorCount++;
+                                    FLogger.Append(ELog.Error, () =>
+                                    {
+                                        FLogger.Text($"✗ Error processing 3D viewer for: {asset.Name} - {ex.Message}", Constants.RED);
                                     });
-                                    // 导出后自动关闭3D Viewer
-                                    SnooperViewer.WindowShouldClose(true, false);            
+                                    
+                                    // 确保在异常时也能清理资源
+                                    try { SnooperViewer.WindowShouldClose(true, true); } catch { }
                                 }
                             }
-                            break;
+                            else
+                            {
+                                FLogger.Append(ELog.Warning, () =>
+                                {
+                                    FLogger.Text($"✗ Cannot load 3D model: {asset.Name}", Constants.ORANGE);
+                                });
+                            }
+                            break; // 找到第一个可用模型后退出循环
                         }
                     }
                 }
                 catch (Exception ex)
                 {
+                    errorCount++;
                     FLogger.Append(ELog.Error, () =>
                     {
-                        FLogger.Text($"Failed to save model: {asset.Name} - {ex.Message}", Constants.RED);
+                        FLogger.Text($"✗ Failed to process: {asset.Name} - {ex.Message}", Constants.RED);
                     });
                 }
             }
+            
+            // 递归处理子文件夹
             foreach (var sub in currentFolder.Folders)
             {
                 ProcessFolder(sub);
             }
         }
-        ProcessFolder(folder);
+        
+        try
+        {
+            FLogger.Append(ELog.Information, () =>
+            {
+                FLogger.Text($"Starting batch model and texture export for folder: {folder.PathAtThisPoint}", Constants.CYAN);
+            });
+            
+            ProcessFolder(folder);
+            
+            // 输出最终统计信息
+            FLogger.Append(ELog.Information, () =>
+            {
+                FLogger.Text($"Batch export completed:", Constants.CYAN);
+                FLogger.Text($" • Total processed: {processedCount}", Constants.WHITE);
+                FLogger.Text($" • Successfully saved: {savedCount}", Constants.GREEN);
+                FLogger.Text($" • Errors: {errorCount}", Constants.RED);
+                FLogger.Text($" • Output directory: ", Constants.WHITE);
+                FLogger.Link(UserSettings.Default.ModelDirectory, UserSettings.Default.ModelDirectory, true);
+            });
+        }
+        catch (Exception ex)
+        {
+            FLogger.Append(ELog.Error, () =>
+            {
+                FLogger.Text($"Batch export failed: {ex.Message}", Constants.RED);
+            });
+        }
     }
 
     public void Extract(CancellationToken cancellationToken, GameFile entry, bool addNewTab = false, EBulkType bulk = EBulkType.None)
